@@ -15,6 +15,7 @@ import ssl
 import aiohttp
 
 from .auth import AuthError, AuthManager, get_auth
+from .config import CONCURRENCY
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class HttpClient:
     def __init__(
         self,
         auth: AuthManager | None = None,
-        concurrency: int = 8,
+        concurrency: int = CONCURRENCY,
         min_delay: float = 0.3,
         max_delay: float = 1.0,
         retries: int = 3,

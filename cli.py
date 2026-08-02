@@ -35,6 +35,12 @@ def main():
     p_issues.add_argument("start_year", type=int)
     p_issues.add_argument("end_year", type=int)
     p_issues.add_argument("--end-month", type=int, default=None)
+    p_issues.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help="HTTP 并发上限(默认取环境变量 NEWSPAPER_CONCURRENCY,再默认 8)",
+    )
 
     p_boards = sub.add_parser("boards", help="抓版面")
     p_boards.add_argument("--paperid", default=None)
@@ -44,6 +50,12 @@ def main():
         default=None,
         help="每轮最多处理多少期次(默认处理全部 pending)",
     )
+    p_boards.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help="HTTP 并发上限(默认取环境变量 NEWSPAPER_CONCURRENCY,再默认 8)",
+    )
 
     p_articles = sub.add_parser("articles", help="抓报道")
     p_articles.add_argument(
@@ -51,6 +63,12 @@ def main():
         type=int,
         default=None,
         help="每轮最多处理多少报道(默认处理全部 pending)",
+    )
+    p_articles.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help="HTTP 并发上限(默认取环境变量 NEWSPAPER_CONCURRENCY,再默认 8)",
     )
 
     p_login = sub.add_parser(

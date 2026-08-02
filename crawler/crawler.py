@@ -22,7 +22,7 @@ from pathlib import Path
 from . import db, parser
 from .auth import AuthError
 from .client import HttpClient
-from .config import BASE_URL, DATA_DIR, PAPERLIST_CSV
+from .config import BASE_URL, CONCURRENCY, DATA_DIR, PAPERLIST_CSV
 from .logging_config import ProgressLogger, setup_logging
 from .notifier import notify_job_result
 
@@ -74,7 +74,7 @@ async def crawl_issues(
     start_year: int,
     end_year: int,
     end_month: int | None = None,
-    concurrency: int = 8,
+    concurrency: int = CONCURRENCY,
 ) -> int:
     """对每份报纸,按月查询期次。返回新增期次数。"""
     papers = await db.get_papers(d)
@@ -111,16 +111,35 @@ async def crawl_issues(
     return total
 
 
+async def _gather_in_batches(items, worker, batch_size: int) -> None:
+    """把 items 切成 batch_size 大小的批,逐批 gather,一批完成才取下一批。
+
+    - worker 处理单个 item,内部自行捕获非致命异常并计数(nonlocal processed)。
+    - 致命异常(AuthError)由 worker 重新 raise,gather 首异常取消同批其余任务并上抛。
+    - items 切片已物化,不再发 DB 查询;items 为空时 range 为空,直接 no-op。
+    """
+    for start in range(0, len(items), batch_size):
+        await asyncio.gather(*(worker(it) for it in items[start : start + batch_size]))
+
+
 # ---------------- 阶段2:版面 + 位置 + 版面图 ----------------
 
 
 async def crawl_boards(
-    client: HttpClient, d, paperid: str | None = None, limit: int | None = None
+    client: HttpClient,
+    d,
+    paperid: str | None = None,
+    limit: int | None = None,
+    concurrency: int = CONCURRENCY,
 ) -> int:
     """处理待爬期次:抓版面列表、版面位置、下载版面图。返回处理期次数。"""
     issues = await db.pending_issues(d, paperid, limit)
     processed = 0
-    for issue in issues:
+    # 每期内部还会摊开到各版面(client._sem 已全局封顶),外批保守取小,避免峰值协程过多
+    batch_size = max(concurrency, 4)
+
+    async def one_issue(issue):
+        nonlocal processed
         paperid_i, date_i = issue["paperid"], issue["date"]
         try:
             ok = await _crawl_one_issue(client, d, paperid_i, date_i)
@@ -131,6 +150,8 @@ async def crawl_boards(
         except Exception as e:  # noqa: BLE001
             logger.warning("期次 %s %s 失败: %s", paperid_i, date_i, e)
             await db.set_issue_status(d, paperid_i, date_i, "failed", str(e))
+
+    await _gather_in_batches(issues, one_issue, batch_size)
     return processed
 
 
@@ -176,9 +197,11 @@ async def _crawl_one_issue(client: HttpClient, d, paperid: str, date_i: str) -> 
     await db.add_boards(d, board_rows)
     logger.info("期次落库 %s %s: 版面 %s 个", paperid, date_i, len(board_rows))
 
-    # 对每个版面:下载版面图 + 解析位置
-    for b in boards:
-        await _crawl_one_board(client, d, paperid, date_i, b)
+    # 各版面并行:下载版面图 + 解析位置。client._sem 全局封顶真实并发。
+    # 版面异常直接冒泡:gather 首异常取消同批其余版面 → 整期 failed(与串行语义一致)。
+    await asyncio.gather(
+        *(_crawl_one_board(client, d, paperid, date_i, b) for b in boards)
+    )
     return True
 
 
@@ -282,10 +305,16 @@ async def _crawl_one_board(
 # ---------------- 阶段3:报道正文 + 配图 ----------------
 
 
-async def crawl_articles(client: HttpClient, d, limit: int | None = None) -> int:
+async def crawl_articles(
+    client: HttpClient, d, limit: int | None = None, concurrency: int = CONCURRENCY
+) -> int:
     articles = await db.pending_articles(d, limit)
     processed = 0
-    for art in articles:
+    # 单篇 worker 轻量(正文 1 请求 + 至多几张配图),批可放大;client._sem 已全局封顶
+    batch_size = max(concurrency * 2, 100)
+
+    async def one_article(art):
+        nonlocal processed
         metaid = art["metaid"]
         try:
             await _crawl_one_article(client, d, art)
@@ -295,6 +324,8 @@ async def crawl_articles(client: HttpClient, d, limit: int | None = None) -> int
         except Exception as e:  # noqa: BLE001
             logger.warning("报道 %s 失败: %s", metaid, e)
             await db.update_article_status(d, metaid, "failed", error=str(e))
+
+    await _gather_in_batches(articles, one_article, batch_size)
     return processed
 
 
@@ -339,19 +370,24 @@ async def _save_article_images(
     results = []
     for i, url in enumerate(img_urls, 1):
         suffix = Path(url).suffix or ".jpg"
-        rel = Path("articles") / code / date_path / tail / f"{i}{suffix}"
+        # 相对路径统一用 / 分隔(as_posix),Windows 上跑出的 DB 路径也能被 Linux 容器解析
+        rel = (Path("articles") / code / date_path / tail / f"{i}{suffix}").as_posix()
         ok = await client.download(url, DATA_DIR / rel)
-        results.append({"url": url, "local_path": str(rel) if ok else None, "ok": ok})
+        results.append({"url": url, "local_path": rel if ok else None, "ok": ok})
     return results
 
 
-def _article_json_path(art: dict) -> Path:
-    """正文 JSON 相对 DATA_DIR 的路径: articles/{code}/{date}/{tail}/content.json"""
+def _article_json_path(art: dict) -> str:
+    """正文 JSON 相对 DATA_DIR 的路径: articles/{code}/{date}/{tail}/content.json
+
+    统一用 / 分隔(as_posix),与平台无关——DB 里存的相对路径跨平台可解析,
+    便于 Docker 卷在 Windows 开发机与 Linux 容器间迁移。
+    """
     code = art["paperid"].replace("n.D", "")
     tail = art["metaid"].split(".")[-1]
     return (
         Path("articles") / code / art["date"].replace("-", "/") / tail / "content.json"
-    )
+    ).as_posix()
 
 
 def write_article_json(art: dict, parsed: dict, img_results: list[dict]) -> str:
@@ -384,7 +420,7 @@ def write_article_json(art: dict, parsed: dict, img_results: list[dict]) -> str:
         ),
         encoding="utf-8",
     )
-    return str(rel)
+    return rel
 
 
 # ---------------- 入口 ----------------
@@ -397,9 +433,11 @@ async def run(stage: str, **kwargs):
         logger.info("阶段0 完成,导入报纸 %s", n)
         return
     d = None
+    # CLI --concurrency 未给时(被 cli.py 过滤掉)回落环境变量/默认;max(1,...) 挡掉 0
+    concurrency = max(1, kwargs.get("concurrency") or CONCURRENCY)
     try:
         d = await db.init_db()
-        async with HttpClient() as client:
+        async with HttpClient(concurrency=concurrency) as client:
             if stage == "issues":
                 n = await crawl_issues(
                     client,
@@ -407,15 +445,20 @@ async def run(stage: str, **kwargs):
                     kwargs["start_year"],
                     kwargs["end_year"],
                     kwargs.get("end_month"),
+                    concurrency,
                 )
                 logger.info("阶段1 完成,新增期次 %s", n)
             elif stage == "boards":
                 n = await crawl_boards(
-                    client, d, kwargs.get("paperid"), kwargs.get("limit")
+                    client,
+                    d,
+                    kwargs.get("paperid"),
+                    kwargs.get("limit"),
+                    concurrency,
                 )
                 logger.info("阶段2 完成,处理期次 %s", n)
             elif stage == "articles":
-                n = await crawl_articles(client, d, kwargs.get("limit"))
+                n = await crawl_articles(client, d, kwargs.get("limit"), concurrency)
                 logger.info("阶段3 完成,处理报道 %s", n)
     except AuthError as e:
         # 认证失效:推送 Bark 告知需要重新登录,再向外抛(CLI 以非零码退出)

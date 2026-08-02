@@ -22,6 +22,8 @@ IMG_URLS = [
     "https://example.com/cnml.files/a.resbrief.1.jpg",
     "https://example.com/cnml.files/b.resbrief.1.jpg",
 ]
+# 相对 DATA_DIR 的文章目录:被测代码以 as_posix() 统一输出 / 分隔,与平台无关
+ART_REL = "articles/330100hzrb/2026/01/10/D330100hzrb_20260110_1-A01"
 
 
 class FakeClient:
@@ -53,8 +55,8 @@ def test_save_images_sequential_indexes_match_blocks(tmp_path, monkeypatch):
 
     assert [r["ok"] for r in results] == [True, True]
     assert [r["local_path"] for r in results] == [
-        "articles/330100hzrb/2026/01/10/D330100hzrb_20260110_1-A01/1.jpg",
-        "articles/330100hzrb/2026/01/10/D330100hzrb_20260110_1-A01/2.jpg",
+        f"{ART_REL}/1.jpg",
+        f"{ART_REL}/2.jpg",
     ]
     # 下载目标与 local_path 相对路径一致
     for r in results:
@@ -113,9 +115,7 @@ def test_write_article_json_backfills_local_path(tmp_path, monkeypatch):
     rel = asyncio.run(_write_article_json(parsed, img_results))
 
     # 相对路径正确
-    assert (
-        rel == "articles/330100hzrb/2026/01/10/D330100hzrb_20260110_1-A01/content.json"
-    )
+    assert rel == f"{ART_REL}/content.json"
     abs_path = tmp_path / rel
     assert abs_path.exists()
 
@@ -135,6 +135,4 @@ async def _write_article_json(parsed, img_results):
 
 def test_article_json_path(tmp_path):
     """_article_json_path 生成相对 DATA_DIR 的 content.json 路径"""
-    assert str(crawler._article_json_path(ART)) == (
-        "articles/330100hzrb/2026/01/10/D330100hzrb_20260110_1-A01/content.json"
-    )
+    assert crawler._article_json_path(ART) == f"{ART_REL}/content.json"
