@@ -1,0 +1,34 @@
+# 依赖与虚拟环境
+.venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+
+# 认证信息
+.secrets/
+
+# 爬取数据(体积巨大)
+data/
+crawl.db
+
+# 浏览器工具临时产物
+.playwright-mcp/
+
+# 环境变量与密钥
+.env
+.env.*
+
+# 测试产物
+.pytest_cache/
+.coverage
+htmlcov/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+
+# 历史归档(仅保留报纸清单 CSV,其余忽略)
+archive/*
+!archive/报纸清单.csv
