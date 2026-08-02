@@ -20,6 +20,7 @@ import logging
 
 from crawler.auth import AuthError
 from crawler.crawler import run
+from crawler.logging_config import setup_logging
 from scripts.login import run_login
 
 
@@ -56,10 +57,7 @@ def main():
 
     args = p.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    setup_logging()
 
     # login 是 Playwright 同步流程,不能混进异步 run(),单独分支执行
     if args.stage == "login":

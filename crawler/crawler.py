@@ -23,8 +23,12 @@ from . import db, parser
 from .auth import AuthError
 from .client import HttpClient
 from .config import BASE_URL, DATA_DIR, PAPERLIST_CSV
+from .logging_config import ProgressLogger, setup_logging
 
 logger = logging.getLogger(__name__)
+
+# 报道落库是最高频事件,用节流日志避免 crawl.log 膨胀(见 ProgressLogger)
+_article_progress = ProgressLogger(__name__)
 
 
 # ---------------- 阶段0:导入报纸清单 ----------------
@@ -124,7 +128,7 @@ async def crawl_boards(
         except AuthError:
             raise
         except Exception as e:  # noqa: BLE001
-            logger.error("期次 %s %s 失败: %s", paperid_i, date_i, e)
+            logger.warning("期次 %s %s 失败: %s", paperid_i, date_i, e)
             await db.set_issue_status(d, paperid_i, date_i, "failed", str(e))
     return processed
 
@@ -169,6 +173,7 @@ async def _crawl_one_issue(client: HttpClient, d, paperid: str, date_i: str) -> 
         for b in boards
     ]
     await db.add_boards(d, board_rows)
+    logger.info("期次落库 %s %s: 版面 %s 个", paperid, date_i, len(board_rows))
 
     # 对每个版面:下载版面图 + 解析位置
     for b in boards:
@@ -239,6 +244,13 @@ async def _crawl_one_board(
                 }
             )
         await db.add_articles(d, article_rows)
+        logger.info(
+            "版面 %s %s 落库 %s 篇报道: %s",
+            paperid,
+            date_i,
+            len(article_rows),
+            board_code,
+        )
         # 保存位置 JSON 到 positions/
         pos_local = (
             DATA_DIR
@@ -280,7 +292,7 @@ async def crawl_articles(client: HttpClient, d, limit: int = 500) -> int:
         except AuthError:
             raise
         except Exception as e:  # noqa: BLE001
-            logger.error("报道 %s 失败: %s", metaid, e)
+            logger.warning("报道 %s 失败: %s", metaid, e)
             await db.update_article_status(d, metaid, "failed", error=str(e))
     return processed
 
@@ -305,6 +317,7 @@ async def _crawl_one_article(client: HttpClient, d, art):
         "image_count": len(img_urls),  # = img 块数
     }
     await db.update_article_status(d, metaid, "done", **fields)
+    _article_progress.tick("报道落库 %s: %s", metaid, parsed["title"])
 
 
 async def _save_article_images(
@@ -377,10 +390,7 @@ def write_article_json(art: dict, parsed: dict, img_results: list[dict]) -> str:
 
 
 async def run(stage: str, **kwargs):
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    setup_logging()
     if stage == "import":
         n = await import_papers_from_csv(kwargs.get("csv"))
         logger.info("阶段0 完成,导入报纸 %s", n)
