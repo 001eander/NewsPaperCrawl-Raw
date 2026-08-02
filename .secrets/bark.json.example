@@ -1,0 +1,5 @@
+{
+  "device_key": "在此填入 Bark 的 device key",
+  "bark_server": "https://api.day.app",
+  "_说明": "Bark 是 iOS 推送。device key 填入后，爬虫会在认证过期等事件时推送通知。格式: curl -d '消息' https://api.day.app/{device_key}/{标题}"
+}

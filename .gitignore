@@ -5,7 +5,8 @@ __pycache__/
 .ruff_cache/
 
 # 认证信息
-.secrets/
+.secrets/*
+!.secrets/*.example
 
 # 爬取数据(体积巨大)
 data/

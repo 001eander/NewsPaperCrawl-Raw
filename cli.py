@@ -8,6 +8,7 @@
   uv run cli.py issues 2014 2026 --end-month 7   # 阶段1: 枚举全部期次(2014~2026-07)
   uv run cli.py boards --limit 50           # 阶段2: 抓版面/位置/版面图(分批)
   uv run cli.py articles --limit 100        # 阶段3: 抓报道正文+配图(分批)
+  uv run cli.py login                       # 登录辅助: 自动填表,手动输验证码/点登录,保存 cookie
 
 所有阶段可反复执行,自动跳过已完成(status=done)。
 认证失效时自动通过 Bark 通知你重新登录。
@@ -18,6 +19,7 @@ import asyncio
 import logging
 
 from crawler.crawler import run
+from scripts.login import run_login
 
 
 def main():
@@ -39,13 +41,31 @@ def main():
     p_articles = sub.add_parser("articles", help="抓报道")
     p_articles.add_argument("--limit", type=int, default=500)
 
+    p_login = sub.add_parser(
+        "login", help="登录辅助: 自动填表,手动输验证码/点登录,保存 cookie"
+    )
+    p_login.add_argument(
+        "--credentials",
+        default=None,
+        help="凭据文件路径(默认 .secrets/credentials.json)",
+    )
+    p_login.add_argument(
+        "--cookies", default=None, help="Cookie 保存路径(默认 .secrets/cookies.json)"
+    )
+
     args = p.parse_args()
-    kwargs = {k: v for k, v in vars(args).items() if k != "stage" and v is not None}
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+    # login 是 Playwright 同步流程,不能混进异步 run(),单独分支执行
+    if args.stage == "login":
+        run_login(credentials_path=args.credentials, cookies_path=args.cookies)
+        return
+
+    kwargs = {k: v for k, v in vars(args).items() if k != "stage" and v is not None}
     asyncio.run(run(args.stage, **kwargs))
 
 
