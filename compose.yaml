@@ -1,0 +1,18 @@
+# 浙图报纸爬虫 —— 开发/部署编排
+
+services:
+  app:
+    build: .
+    image: npc-r:latest
+    volumes:
+      - crawl_data:/app/data
+      - ./.secrets:/app/.secrets:ro
+      - ./archive:/app/archive:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - NEWSPAPER_DATA_DIR=/app/data
+      - NEWSPAPER_SECRETS_DIR=/app/.secrets
+      - NEWSPAPER_PAPERLIST_CSV=/app/archive/报纸清单.csv
+
+volumes:
+  crawl_data:

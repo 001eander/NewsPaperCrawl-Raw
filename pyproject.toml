@@ -1,0 +1,23 @@
+[project]
+name = "newspapercrawl-raw"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.14.3",
+    "aiosqlite>=0.22.1",
+    "beautifulsoup4>=4.15.0",
+    "openpyxl>=3.1.5",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.1",
+]
+
+[tool.ruff.lint]
+# E4/E7/E9 与 F 为默认启用;补充启用 import 排序规则 I
+extend-select = ["I"]
+# ASYNC230: 一次性导入 CSV 用同步 open 更简洁,引入异步文件库属于过度设计
+ignore = ["ASYNC230"]

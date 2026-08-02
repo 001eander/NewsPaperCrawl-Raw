@@ -1,0 +1,15 @@
+# pre-commit 钩子配置
+# 使用 uvx 运行 pre-commit（避免污染项目虚拟环境）:
+#   uvx pre-commit install
+# 手动运行全部钩子:
+#   uvx pre-commit run --all-files
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      - id: ruff-format
+        name: ruff-format
+        args: [--check]
+      - id: ruff
+        name: ruff-lint
+        args: [--fix, --exit-non-zero-on-fix]
