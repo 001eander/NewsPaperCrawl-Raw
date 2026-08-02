@@ -54,7 +54,7 @@ def parse_boards_from_page(html: str, date: str) -> list[dict]:
         inp = a.find("input", class_="newsMetaid")
         if not inp:
             continue
-        metaid = inp.get("value", "").strip()
+        metaid = str(inp.get("value", "")).strip()
         if not metaid.startswith("nb."):
             continue
         # 只保留当前日期的版面(排除 上一期/下一期)
@@ -84,10 +84,12 @@ def parse_article_positions(html: str, date: str) -> list[dict]:
         return []
     results = []
     for area in map_el.find_all("area"):
-        coords = area.get("coords", "")
+        coords = str(area.get("coords", ""))
         metaid = ""
-        onclick = area.get("onclick", "")
-        m = re.search(r"nw\.[A-Z0-9a-z_.]+", onclick)
+        onclick = str(area.get("onclick", ""))
+        # 完整 metaid 带版面码后缀,如 nw.D330100hzrb_20260110_1-A01
+        # (后缀格式随报纸而异:A01 / 01 / A1),必须含 `-` 否则会被截断导致请求失败
+        m = re.search(r"nw\.[A-Z0-9a-z_.-]+", onclick)
         if m:
             metaid = m.group(0)
         title = area.get("titlestr", "") or area.get("title", "") or ""
@@ -157,7 +159,7 @@ def parse_article_images(html: str) -> list[str]:
     urls = []
     seen = set()
     for img in soup.find_all("img"):
-        src = img.get("src", "")
+        src = str(img.get("src", ""))
         if "cnml.files" in src and ".resbrief." in src and src not in seen:
             seen.add(src)
             urls.append(src)
