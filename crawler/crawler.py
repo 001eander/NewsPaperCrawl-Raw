@@ -115,7 +115,7 @@ async def crawl_issues(
 
 
 async def crawl_boards(
-    client: HttpClient, d, paperid: str | None = None, limit: int = 200
+    client: HttpClient, d, paperid: str | None = None, limit: int | None = None
 ) -> int:
     """处理待爬期次:抓版面列表、版面位置、下载版面图。返回处理期次数。"""
     issues = await db.pending_issues(d, paperid, limit)
@@ -282,7 +282,7 @@ async def _crawl_one_board(
 # ---------------- 阶段3:报道正文 + 配图 ----------------
 
 
-async def crawl_articles(client: HttpClient, d, limit: int = 500) -> int:
+async def crawl_articles(client: HttpClient, d, limit: int | None = None) -> int:
     articles = await db.pending_articles(d, limit)
     processed = 0
     for art in articles:
@@ -411,11 +411,11 @@ async def run(stage: str, **kwargs):
                 logger.info("阶段1 完成,新增期次 %s", n)
             elif stage == "boards":
                 n = await crawl_boards(
-                    client, d, kwargs.get("paperid"), kwargs.get("limit", 200)
+                    client, d, kwargs.get("paperid"), kwargs.get("limit")
                 )
                 logger.info("阶段2 完成,处理期次 %s", n)
             elif stage == "articles":
-                n = await crawl_articles(client, d, kwargs.get("limit", 500))
+                n = await crawl_articles(client, d, kwargs.get("limit"))
                 logger.info("阶段3 完成,处理报道 %s", n)
     except AuthError as e:
         # 认证失效:推送 Bark 告知需要重新登录,再向外抛(CLI 以非零码退出)

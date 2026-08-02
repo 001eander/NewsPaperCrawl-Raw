@@ -156,18 +156,20 @@ async def add_issues(db: aiosqlite.Connection, paperid: str, dates: list[str]) -
 
 
 async def pending_issues(
-    db: aiosqlite.Connection, paperid: str | None = None, limit: int = 500
+    db: aiosqlite.Connection,
+    paperid: str | None = None,
+    limit: int | None = None,
 ) -> list[aiosqlite.Row]:
-    """取待爬取的期次(可限定报纸)"""
+    """取待爬取的期次(可限定报纸)。limit=None 表示不限制数量。"""
+    sql = "SELECT * FROM issues WHERE status='pending'"
+    args: list = []
     if paperid:
-        cur = await db.execute(
-            "SELECT * FROM issues WHERE paperid=? AND status='pending' LIMIT ?",
-            (paperid, limit),
-        )
-    else:
-        cur = await db.execute(
-            "SELECT * FROM issues WHERE status='pending' LIMIT ?", (limit,)
-        )
+        sql += " AND paperid=?"
+        args.append(paperid)
+    if limit is not None:
+        sql += " LIMIT ?"
+        args.append(limit)
+    cur = await db.execute(sql, tuple(args))
     return list(await cur.fetchall())
 
 
@@ -210,11 +212,15 @@ async def add_articles(db: aiosqlite.Connection, articles: list[dict]) -> None:
 
 
 async def pending_articles(
-    db: aiosqlite.Connection, limit: int = 500
+    db: aiosqlite.Connection, limit: int | None = None
 ) -> list[aiosqlite.Row]:
-    cur = await db.execute(
-        "SELECT * FROM articles WHERE status='pending' LIMIT ?", (limit,)
-    )
+    """取待爬取的报道。limit=None 表示不限制数量。"""
+    sql = "SELECT * FROM articles WHERE status='pending'"
+    args: list = []
+    if limit is not None:
+        sql += " LIMIT ?"
+        args.append(limit)
+    cur = await db.execute(sql, tuple(args))
     return list(await cur.fetchall())
 
 

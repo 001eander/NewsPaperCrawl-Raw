@@ -6,8 +6,8 @@
 用法:
   uv run cli.py import                       # 阶段0: 导入报纸清单
   uv run cli.py issues 2014 2026 --end-month 7   # 阶段1: 枚举全部期次(2014~2026-07)
-  uv run cli.py boards --limit 50           # 阶段2: 抓版面/位置/版面图(分批)
-  uv run cli.py articles --limit 100        # 阶段3: 抓报道正文+配图(分批)
+  uv run cli.py boards --limit 50           # 阶段2: 抓版面/位置/版面图(省略 --limit 处理全部 pending)
+  uv run cli.py articles --limit 100        # 阶段3: 抓报道正文+配图(省略 --limit 处理全部 pending)
   uv run cli.py login                       # 登录辅助: 自动填表,手动输验证码/点登录,保存 cookie
 
 所有阶段可反复执行,自动跳过已完成(status=done)。
@@ -38,10 +38,20 @@ def main():
 
     p_boards = sub.add_parser("boards", help="抓版面")
     p_boards.add_argument("--paperid", default=None)
-    p_boards.add_argument("--limit", type=int, default=200)
+    p_boards.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="每轮最多处理多少期次(默认处理全部 pending)",
+    )
 
     p_articles = sub.add_parser("articles", help="抓报道")
-    p_articles.add_argument("--limit", type=int, default=500)
+    p_articles.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="每轮最多处理多少报道(默认处理全部 pending)",
+    )
 
     p_login = sub.add_parser(
         "login", help="登录辅助: 自动填表,手动输验证码/点登录,保存 cookie"
