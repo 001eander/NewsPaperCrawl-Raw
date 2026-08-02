@@ -16,6 +16,8 @@ import re
 
 from bs4 import BeautifulSoup
 
+from .config import BASE_URL
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,39 +36,35 @@ def parse_issue_dates(xml_text: str) -> list[str]:
 def parse_boards_from_page(html: str, date: str) -> list[dict]:
     """
     从版面页 HTML 提取该期全部版面。
-    返回 [{metaid, board_no, board_name}]
-    排除: 上一期/下一期/上一版/下一版 等导航链接。
+
+    版面条目是结构化标记:
+      <a title="A1版：时政">
+        <input class="newsMetaid" type="hidden" value="nb.D411300nyrb_20260731_A1">
+        A1版：时政
+      </a>
+    真 metaid 藏在 input.newsMetaid 的 value 里;链接文本即"版号+版面名"整体
+    (如 "A1版：时政" / "01版：首版"),不再拆版号与版面名。
+    导航链接(上一期/下一版)没有这个 input,天然被排除。
+
+    返回 [{metaid, board_no}],board_no 为"版号+版面名"整体。
     """
     soup = BeautifulSoup(html, "html.parser")
     boards: dict[str, dict] = {}
     for a in soup.find_all("a", href=True):
-        href = a["href"]
-        m = re.search(r"metaid=(nb\.[^&]+)", href)
-        if not m:
+        inp = a.find("input", class_="newsMetaid")
+        if not inp:
             continue
-        metaid = m.group(1)
+        metaid = inp.get("value", "").strip()
+        if not metaid.startswith("nb."):
+            continue
         # 只保留当前日期的版面(排除 上一期/下一期)
         if date.replace("-", "") not in metaid:
             continue
-        # 排除导航链接(文本是"上一期/下一期/上一版/下一版")
-        text = a.get_text(" ", strip=True).strip()
-        if text in ("上一期", "下一期", "上一版", "下一版", "上一页", "下一页"):
-            continue
-        # 提取版号 + 版面名,如 "A1版：时政要闻" -> board_no="A1", name="时政要闻"
-        # 匹配 "A01版" / "A1版" / "A1B版" 等
-        bm = re.match(r"^(A?\d+[A-Z]?)版", text)
-        if bm:
-            board_no = bm.group(1)
-            name = text[bm.end() :].lstrip("：: ")
-        else:
-            board_no = metaid.split("_")[-1]
-            name = ""
+        board_no = a.get_text(" ", strip=True).strip()
+        if not board_no:
+            board_no = metaid.split("_")[-1]  # 兜底: 取 metaid 尾段
         if metaid not in boards:
-            boards[metaid] = {
-                "metaid": metaid,
-                "board_no": board_no,
-                "board_name": name,
-            }
+            boards[metaid] = {"metaid": metaid, "board_no": board_no}
     return list(boards.values())
 
 
@@ -174,10 +172,14 @@ def build_board_image_url(paperid: str, date: str, board_no: str) -> str:
     构造版面图 URL。
     paperid: n.D411300nyrb
     date:    YYYY-MM-DD
-    board_no: A1 / A01
-    注意: 版面编码 A01 vs A1 需要在版面页里拿真实 board_no(含在 metaid 中)。
+    board_no: A1 / 01 / A1版：时政 / nb.D411300nyrb_20260731_A1
+    编码规则: 若 board_no 传的是 metaid(建议),取日期后、下划线尾段作为真实版面编码
+    (含字母/前导零,如 A1 / 01);否则原样使用。图片路径里版面编码由 _ 改为 -。
     """
     code = paperid.replace("n.", "")  # D411300nyrb —— 目录名和 metaid 都带 D
+    if board_no.startswith("nb."):
+        # metaid: nb.D411300nyrb_20260731_A1 -> 编码 A1
+        board_no = board_no.split("_")[-1]
     y, m, d = date.split("-")
     return (
         f"https://img.enews.apabi.com/{code}/{y}-{m}/{d}/mpml.files/"
@@ -187,21 +189,12 @@ def build_board_image_url(paperid: str, date: str, board_no: str) -> str:
 
 def build_issue_url(paperid: str, year: int, month: int) -> str:
     """构造月份期次查询 URL"""
-    return (
-        "https://apabi--com.elib.zyproxy.zjlib.cn/zjlib/"
-        f"?pid=newspaper.issue&year={year}&month={month}&metaid={paperid}"
-    )
+    return BASE_URL + f"?pid=newspaper.issue&year={year}&month={month}&metaid={paperid}"
 
 
 def build_board_page_url(metaid: str) -> str:
-    return (
-        "https://apabi--com.elib.zyproxy.zjlib.cn/zjlib/"
-        f"?pid=newspaper.page&metaid={metaid}&cult=CN"
-    )
+    return BASE_URL + f"?pid=newspaper.page&metaid={metaid}&cult=CN"
 
 
 def build_article_url(metaid: str) -> str:
-    return (
-        "https://apabi--com.elib.zyproxy.zjlib.cn/zjlib/"
-        f"?pid=newspaper.article&metaid={metaid}&cult=CN"
-    )
+    return BASE_URL + f"?pid=newspaper.article&metaid={metaid}&cult=CN"

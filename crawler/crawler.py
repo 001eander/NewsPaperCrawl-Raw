@@ -22,7 +22,7 @@ from pathlib import Path
 from . import db, parser
 from .auth import AuthError
 from .client import HttpClient
-from .config import DATA_DIR, PAPERLIST_CSV
+from .config import BASE_URL, DATA_DIR, PAPERLIST_CSV
 
 logger = logging.getLogger(__name__)
 
@@ -137,10 +137,7 @@ async def _crawl_one_issue(client: HttpClient, d, paperid: str, date_i: str) -> 
     # 探测:先请求 paperid 版面页(默认最新期)拿当日版面列表
     # 方法:构造 nb.{code}_{date}_A1 试探?不。更稳:请求 paperid 页,页面含日期导航
     # 实际上最稳的是:newspaper.page&paperid=... 会返回某期,再取其 nb.* 链接
-    probe_url = (
-        "https://apabi--com.elib.zyproxy.zjlib.cn/zjlib/"
-        f"?pid=newspaper.page&paperid={paperid}&wd=&cult=CN"
-    )
+    probe_url = BASE_URL + f"?pid=newspaper.page&paperid={paperid}&wd=&cult=CN"
     html = await client.get(probe_url)
     # 若该页是默认最新期,日期可能不是我们要的日期。我们只想要它的版面编码格式。
     # 正确做法:拿默认期版面 metaid,替换日期为目标日期,再请求。
@@ -160,14 +157,14 @@ async def _crawl_one_issue(client: HttpClient, d, paperid: str, date_i: str) -> 
         logger.warning("期次 %s %s 无版面(可能未收录)", paperid, date_i)
         return False
 
-    # 写入版面
+    # 写入版面(board_name 列保留但已并入 board_no,置空)
     board_rows = [
         {
             "metaid": b["metaid"],
             "paperid": paperid,
             "date": date_i,
             "board_no": b["board_no"],
-            "board_name": b["board_name"],
+            "board_name": "",
         }
         for b in boards
     ]
@@ -192,19 +189,25 @@ def _find_board_metaid_template(html: str) -> str | None:
     return m.group(1) if m else None
 
 
+def extract_board_code(metaid: str) -> str:
+    """从版面 metaid 取尾段作为版面编码,如 nb.D411300nyrb_20260731_A1 -> A1"""
+    return metaid.split("_")[-1]
+
+
 async def _crawl_one_board(
     client: HttpClient, d, paperid: str, date_i: str, board: dict
 ):
     """下载版面图 + 解析报道位置"""
     board_metaid = board["metaid"]
-    # 版面图 URL
-    img_url = parser.build_board_image_url(paperid, date_i, board["board_no"])
+    board_code = extract_board_code(board_metaid)
+    # 版面图 URL(传 metaid,由 build_board_image_url 取真实编码)
+    img_url = parser.build_board_image_url(paperid, date_i, board_metaid)
     img_local = (
         DATA_DIR
         / "boards"
         / paperid.replace("n.D", "")
         / date_i.replace("-", "/")
-        / f"{board['board_no']}.jpg"
+        / f"{board_code}.jpg"
     )
     ok = await client.download(img_url, img_local)
     if ok:
@@ -242,7 +245,7 @@ async def _crawl_one_board(
             / "positions"
             / paperid.replace("n.D", "")
             / date_i.replace("-", "/")
-            / f"{board['board_no']}.json"
+            / f"{board_code}.json"
         )
         pos_local.parent.mkdir(parents=True, exist_ok=True)
         pos_local.write_text(
@@ -252,7 +255,6 @@ async def _crawl_one_board(
                     "paperid": paperid,
                     "date": date_i,
                     "board_no": board["board_no"],
-                    "board_name": board["board_name"],
                     "img_w": 350,
                     "img_h": 550,
                     "articles": positions,

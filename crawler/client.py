@@ -78,8 +78,11 @@ class HttpClient:
                     ) as resp:
                         if resp.status == 404:
                             return ""
+                        # 认证检测①: 被重定向到登录域(cookie 过期 → 302 -> login.xxx)
+                        if _redirected_to_login(resp):
+                            raise AuthError(f"认证失效于 {url}(被重定向到登录页)")
                         text = await resp.text()
-                        # 认证检测
+                        # 认证检测②: 响应内容呈现登录页(兜底)
                         self.auth.check_and_raise(url, text)
                         if resp.status >= 400:
                             raise RuntimeError(f"HTTP {resp.status} for {url}")
@@ -117,3 +120,41 @@ class HttpClient:
                     logger.debug("下载失败 %s 第%s次: %s", url, attempt + 1, e)
                     await asyncio.sleep(2**attempt)
         return False
+
+
+# 登录域特征:被重定向到这些入口即判定为认证失效
+_LOGIN_HOST_MARKERS = (
+    "login.",
+    "sso.",
+    ".sso.",
+)
+_LOGIN_PATH_MARKERS = (
+    "/sso/login",
+    "/index.php?",
+    "/login.aspx",
+    "/login",
+)
+
+
+def _redirected_to_login(resp) -> bool:
+    """
+    判定响应是否被重定向到了登录入口。
+
+    cookie 过期时,服务端会 302 跳到登录域:
+      history: 302 apabi--com.xxx/zjlib/?pid=... -> login.elib.zyproxy.zjlib.cn/index.php?pre=...
+    aiohttp 默认跟随重定向,但 history 保留了全部 3xx;最终 URL 落在登录域即为失效。
+    """
+    if resp.history:
+        for h in resp.history:
+            loc = (h.headers.get("Location") or "").lower()
+            if "login" in loc or "sso" in loc:
+                return True
+    final = str(resp.url).lower()
+    if final.startswith("http"):
+        host = final.split("//")[1].split("/")[0]
+        if any(m in host for m in _LOGIN_HOST_MARKERS):
+            return True
+        path = "/" + final.split("//")[1].split("/", 1)[-1]
+        if any(m in path for m in _LOGIN_PATH_MARKERS):
+            return True
+    return False

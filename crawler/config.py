@@ -27,3 +27,5 @@ DATA_DIR = _env("NEWSPAPER_DATA_DIR", BASE_DIR / "data")
 SECRETS_DIR = _env("NEWSPAPER_SECRETS_DIR", BASE_DIR / ".secrets")
 DB_PATH = _env("NEWSPAPER_DB_PATH", DATA_DIR / "crawl.db")
 PAPERLIST_CSV = _env("NEWSPAPER_PAPERLIST_CSV", BASE_DIR / "archive" / "报纸清单.csv")
+
+BASE_URL = "https://apabi--com.elib.zyproxy.zjlib.cn/zjlib/"
