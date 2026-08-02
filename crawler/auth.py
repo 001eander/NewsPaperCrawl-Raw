@@ -13,9 +13,8 @@ import json
 import logging
 from pathlib import Path
 
-import aiohttp
-
 from .config import SECRETS_DIR
+from .notifier import BarkNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -157,41 +156,8 @@ class AuthManager:
     # ---- Bark 通知 ----
 
     def notify(self, title: str, body: str = ""):
-        """通过 Bark 推送通知到手机"""
-        if not self.bark_file.exists():
-            logger.warning("缺少 bark.json,跳过通知: %s - %s", title, body)
-            return
-        try:
-            data = json.loads(self.bark_file.read_text(encoding="utf-8"))
-            key = data.get("device_key", "")
-            server = data.get("bark_server", "https://api.day.app")
-        except (json.JSONDecodeError, KeyError):
-            logger.warning("bark.json 无效,跳过通知")
-            return
-        if not key or key.startswith("在此填入"):
-            logger.warning("bark.json 未配置有效 device_key,跳过通知")
-            return
-
-        import asyncio
-
-        async def _push():
-            url = f"{server}/{key}/{title}"
-            if body:
-                url += f"/{body}"
-            async with aiohttp.ClientSession() as sess:
-                try:
-                    async with sess.get(
-                        url, timeout=aiohttp.ClientTimeout(total=10)
-                    ) as r:
-                        logger.info("Bark 推送: %s (HTTP %s)", title, r.status)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Bark 推送失败: %s", e)
-
-        try:
-            asyncio.create_task(_push())
-        except RuntimeError:
-            # 无运行中的事件循环时(同步上下文)直接运行
-            asyncio.run(_push())
+        """通过 Bark 推送通知到手机(委托 BarkNotifier)"""
+        BarkNotifier().notify(title, body)
 
 
 # 单例

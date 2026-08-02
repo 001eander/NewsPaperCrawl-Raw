@@ -24,6 +24,7 @@ from .auth import AuthError
 from .client import HttpClient
 from .config import BASE_URL, DATA_DIR, PAPERLIST_CSV
 from .logging_config import ProgressLogger, setup_logging
+from .notifier import notify_job_result
 
 logger = logging.getLogger(__name__)
 
@@ -416,6 +417,18 @@ async def run(stage: str, **kwargs):
             elif stage == "articles":
                 n = await crawl_articles(client, d, kwargs.get("limit", 500))
                 logger.info("阶段3 完成,处理报道 %s", n)
+    except AuthError as e:
+        # 认证失效:推送 Bark 告知需要重新登录,再向外抛(CLI 以非零码退出)
+        notify_job_result(outcome="auth", stage=stage)
+        logger.error("认证失效: %s", e)
+        raise
+    except Exception as e:
+        # 未知错误:推送 Bark 告知异常中断
+        notify_job_result(outcome="error", stage=stage, message=str(e))
+        raise
+    else:
+        # 正常完成:推送 Bark 告知本轮处理结果
+        notify_job_result(outcome="done", stage=stage, processed=n)
     finally:
         # 无论正常完成还是异常(AuthError 等),都必须关闭 DB 连接,
         # 否则 aiosqlite 后台线程永远阻塞在队列等待,进程无法退出。

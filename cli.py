@@ -68,9 +68,12 @@ def main():
     try:
         asyncio.run(run(args.stage, **kwargs))
     except AuthError as e:
-        # 认证失效:给出可操作提示并以非零码退出(便于 cron/systemd 感知失败)
+        # 认证失效:已由 run() 推送 Bark,这里给出可操作提示并以非零码退出
+        # (便于 cron/systemd 感知失败)
         logging.getLogger(__name__).error(
-            "认证失效: %s\n请重新执行 uv run cli.py login 更新登录状态后再试", e
+            "认证失效: %s\n已通过 Bark 推送通知,请重新执行 uv run cli.py login "
+            "更新登录状态后再试",
+            e,
         )
         raise SystemExit(1) from None
 
