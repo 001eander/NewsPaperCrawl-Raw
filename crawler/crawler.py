@@ -385,23 +385,32 @@ async def run(stage: str, **kwargs):
         n = await import_papers_from_csv(kwargs.get("csv"))
         logger.info("阶段0 完成,导入报纸 %s", n)
         return
-    d = await db.init_db()
-    async with HttpClient() as client:
-        if stage == "issues":
-            n = await crawl_issues(
-                client,
-                d,
-                kwargs["start_year"],
-                kwargs["end_year"],
-                kwargs.get("end_month"),
-            )
-            logger.info("阶段1 完成,新增期次 %s", n)
-        elif stage == "boards":
-            n = await crawl_boards(
-                client, d, kwargs.get("paperid"), kwargs.get("limit", 200)
-            )
-            logger.info("阶段2 完成,处理期次 %s", n)
-        elif stage == "articles":
-            n = await crawl_articles(client, d, kwargs.get("limit", 500))
-            logger.info("阶段3 完成,处理报道 %s", n)
-    await d.close()
+    d = None
+    try:
+        d = await db.init_db()
+        async with HttpClient() as client:
+            if stage == "issues":
+                n = await crawl_issues(
+                    client,
+                    d,
+                    kwargs["start_year"],
+                    kwargs["end_year"],
+                    kwargs.get("end_month"),
+                )
+                logger.info("阶段1 完成,新增期次 %s", n)
+            elif stage == "boards":
+                n = await crawl_boards(
+                    client, d, kwargs.get("paperid"), kwargs.get("limit", 200)
+                )
+                logger.info("阶段2 完成,处理期次 %s", n)
+            elif stage == "articles":
+                n = await crawl_articles(client, d, kwargs.get("limit", 500))
+                logger.info("阶段3 完成,处理报道 %s", n)
+    finally:
+        # 无论正常完成还是异常(AuthError 等),都必须关闭 DB 连接,
+        # 否则 aiosqlite 后台线程永远阻塞在队列等待,进程无法退出。
+        if d is not None:
+            try:
+                await d.close()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("关闭数据库连接失败: %s", e)

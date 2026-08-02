@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import logging
 
+from crawler.auth import AuthError
 from crawler.crawler import run
 from scripts.login import run_login
 
@@ -66,7 +67,14 @@ def main():
         return
 
     kwargs = {k: v for k, v in vars(args).items() if k != "stage" and v is not None}
-    asyncio.run(run(args.stage, **kwargs))
+    try:
+        asyncio.run(run(args.stage, **kwargs))
+    except AuthError as e:
+        # 认证失效:给出可操作提示并以非零码退出(便于 cron/systemd 感知失败)
+        logging.getLogger(__name__).error(
+            "认证失效: %s\n请重新执行 uv run cli.py login 更新登录状态后再试", e
+        )
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
