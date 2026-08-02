@@ -6,7 +6,7 @@
   阶段0  import_papers    从 报纸清单.csv 导入 papers 表(可重复执行)
   阶段1  crawl_issues     每报×每月调 newspaper.issue,枚举全部期次
   阶段2  crawl_boards     每期抓版面页 -> 版面列表 + 版面位置 + 版面图
-  阶段3  crawl_articles   每篇抓报道页 -> 正文 + 配图
+  阶段3  crawl_articles   每篇抓报道页 -> 保序正文 JSON + 配图
 
 每个阶段以 SQLite 的 status 为状态机,跳过已 done。
 认证失效时抛 AuthError,由 Bark 通知用户重新登录。
@@ -292,31 +292,85 @@ async def _crawl_one_article(client: HttpClient, d, art):
     if not parsed:
         await db.update_article_status(d, metaid, "failed", error="无法解析")
         return
-    # 配图
-    img_urls = parser.parse_article_images(html)
+    blocks = parsed["blocks"]
+    # 按 blocks 中图片顺序取 URL,保证下载序号与 img 块 index 一致
+    img_urls = [b["src"] for b in blocks if b["type"] == "img"]
+    # 先下载全部配图,拿到最终 local_path,再写 JSON(只写一次,内容与已下载文件一致)
+    img_results = await _save_article_images(client, d, art, img_urls)
+    content_rel = write_article_json(art, parsed, img_results)
     fields = {
         "title": parsed["title"],
-        "content": parsed["content"],
+        "content_path": content_rel,  # 相对 DATA_DIR 的路径
         "source_meta": parsed["source_meta"],
-        "image_count": len(img_urls),
+        "image_count": len(img_urls),  # = img 块数
     }
     await db.update_article_status(d, metaid, "done", **fields)
-    # 下载配图
-    if img_urls:
-        await _save_article_images(client, d, art, img_urls)
 
 
-async def _save_article_images(client: HttpClient, d, art, img_urls: list[str]):
-    paperid, date_i = art["paperid"], art["date"]
-    metaid = art["metaid"]
-    code = paperid.replace("n.D", "")
-    # 文章元数据文件
-    art_dir = DATA_DIR / "articles" / code / date_i.replace("-", "/")
+async def _save_article_images(
+    client: HttpClient, d, art, img_urls: list[str]
+) -> list[dict]:
+    """
+    按序下载配图到文章目录(每篇文章一个目录),返回有序结果。
+    文件名序号(1 起)与 blocks 中 img 块 index 对应,保证 JSON 引用最终文件。
+
+    返回 [{url, local_path, ok}];local_path 为相对 DATA_DIR 的路径,
+    下载失败为 None(JSON 里该 img 块回退 src)。
+    """
+    code = art["paperid"].replace("n.D", "")
+    tail = art["metaid"].split(".")[-1]
+    date_path = art["date"].replace("-", "/")
+    art_dir = DATA_DIR / "articles" / code / date_path / tail
     art_dir.mkdir(parents=True, exist_ok=True)
+    results = []
     for i, url in enumerate(img_urls, 1):
         suffix = Path(url).suffix or ".jpg"
-        local = art_dir / f"{metaid.split('.')[-1]}_{i}{suffix}"
-        await client.download(url, local)
+        rel = Path("articles") / code / date_path / tail / f"{i}{suffix}"
+        ok = await client.download(url, DATA_DIR / rel)
+        results.append({"url": url, "local_path": str(rel) if ok else None, "ok": ok})
+    return results
+
+
+def _article_json_path(art: dict) -> Path:
+    """正文 JSON 相对 DATA_DIR 的路径: articles/{code}/{date}/{tail}/content.json"""
+    code = art["paperid"].replace("n.D", "")
+    tail = art["metaid"].split(".")[-1]
+    return (
+        Path("articles") / code / art["date"].replace("-", "/") / tail / "content.json"
+    )
+
+
+def write_article_json(art: dict, parsed: dict, img_results: list[dict]) -> str:
+    """
+    把保序 blocks 写为 content.json;按 img_results 回填各 img 块的 local_path。
+    返回相对 DATA_DIR 的路径(便于 Docker 卷可移植)。
+    """
+    img_by_src = {r["url"]: r for r in img_results}
+    final_blocks = []
+    for b in parsed["blocks"]:
+        if b["type"] == "img" and b["src"] in img_by_src:
+            b = {**b, "local_path": img_by_src[b["src"]]["local_path"]}
+        final_blocks.append(b)
+    rel = _article_json_path(art)
+    abs_path = DATA_DIR / rel
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_text(
+        json.dumps(
+            {
+                "metaid": art["metaid"],
+                "paperid": art["paperid"],
+                "date": art["date"],
+                "board_metaid": art["board_metaid"],
+                "title": parsed["title"],
+                "source_meta": parsed["source_meta"],
+                "blocks": final_blocks,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return str(rel)
 
 
 # ---------------- 入口 ----------------

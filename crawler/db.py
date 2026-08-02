@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS articles (
     date         TEXT NOT NULL,
     board_metaid TEXT,
     title        TEXT,
-    content      TEXT,                  -- 正文全文
+    content_path TEXT,              -- 正文 JSON 相对 data/ 的路径(旧列 content 迁移而来)
     source_meta  TEXT,                  -- "报纸/日期/版面/栏目" 元信息
     bbox_x REAL, bbox_y REAL, bbox_w REAL, bbox_h REAL,  -- 版面位置(像素,版面图坐标)
     poly_points TEXT,                   -- 原始多边形坐标 JSON
@@ -94,6 +94,7 @@ async def init_db(path: Path = DB_PATH) -> aiosqlite.Connection:
     db = await aiosqlite.connect(str(path), timeout=30)
     db.row_factory = aiosqlite.Row
     await db.executescript(SCHEMA)
+    await _migrate_articles_schema(db)  # 旧库: articles.content -> content_path
     # WAL 模式: 读写不互斥,多进程友好
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA busy_timeout=30000")  # 等锁最多 30s
@@ -101,6 +102,24 @@ async def init_db(path: Path = DB_PATH) -> aiosqlite.Connection:
     await db.commit()
     logger.info("数据库已初始化: %s", path)
     return db
+
+
+async def _migrate_articles_schema(db: aiosqlite.Connection) -> None:
+    """
+    既有库迁移: articles.content -> content_path(幂等)。
+
+    正文已改为文件系统 JSON,content 列的旧文本弃置(开发环境 breaking change)。
+    仅当旧列 content 存在且新列 content_path 不存在时执行一次 RENAME,
+    随后立即把 content_path 置 NULL,避免"路径列里存全文"的脏状态。
+    新库由 SCHEMA 直接建 content_path,此处自动跳过。
+    """
+    cur = await db.execute("PRAGMA table_info(articles)")
+    cols = [r["name"] for r in await cur.fetchall()]
+    if "content" in cols and "content_path" not in cols:
+        await db.execute("ALTER TABLE articles RENAME COLUMN content TO content_path")
+        await db.execute("UPDATE articles SET content_path = NULL")
+        await db.commit()
+        logger.info("articles.content 已迁移为 articles.content_path")
 
 
 # ---- 报纸清单 ----

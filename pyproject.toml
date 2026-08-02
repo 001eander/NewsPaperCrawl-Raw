@@ -14,6 +14,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ruff>=0.16.1",
+    "pytest>=8.0.0",
 ]
 
 [tool.ruff.lint]
@@ -21,3 +22,7 @@ dev = [
 extend-select = ["I"]
 # ASYNC230: 一次性导入 CSV 用同步 open 更简洁,引入异步文件库属于过度设计
 ignore = ["ASYNC230"]
+
+[tool.pytest.ini_options]
+# 项目未安装为包(uv sync --no-install-project),测试需从项目根导入 crawler
+pythonpath = ["."]

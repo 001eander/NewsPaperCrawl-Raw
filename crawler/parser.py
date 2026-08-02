@@ -5,8 +5,8 @@ HTML 解析模块
   - 期次列表: newspaper.issue 的 XML
   - 版面列表: 版面页 HTML 里的 nb.* 链接(需探测,编码不统一)
   - 版面位置: <map> area 多边形坐标 + 对应文章 metaid
-  - 报道正文: h2.bo 标题 + .daxiao 元数据 + #zoom 正文
-  - 报道配图: 文章页 <img cnml.files/*.resbrief.jpg>
+  - 报道正文: h2.bo 标题 + .daxiao 元数据 + #zoom 正文(保序 blocks: 段落+配图)
+  - 报道配图: #zoom 内 <img cnml.files/*.resbrief.jpg>(随正文保序提取)
 
 全部基于纯文本 HTML 解析,不依赖浏览器。
 """
@@ -124,8 +124,16 @@ def bbox_of(points: list[tuple[float, float]]) -> dict:
 
 def parse_article(html: str) -> dict | None:
     """
-    从报道页 HTML 提取标题、元信息、正文。
-    返回 {title, source_meta, content}
+    从报道页 HTML 提取标题、元信息、正文(保序的段落+图片列表)。
+    返回 {title, source_meta, blocks}
+
+    blocks 按 #zoom 内文档序遍历 <p>/<img> 生成,保留图片与段落的真实顺序:
+      - 段落块: {type:"p", text}
+      - 图片块: {type:"img", src, alt, index, local_path}
+        index 为该文第几个图片块(1 起),与配图下载文件名序号对应;
+        local_path 由阶段3下载后回填,解析阶段为 None。
+    图片过滤条件与 parse_article_images 一致(cnml.files + .resbrief.),
+    恰好排除页面装饰图;按 src 去重,仅保留首次出现。
     """
     soup = BeautifulSoup(html, "html.parser")
     title_el = soup.find("h2", class_="bo")
@@ -136,18 +144,34 @@ def parse_article(html: str) -> dict | None:
     if meta_el:
         raw = meta_el.get_text("\n", strip=True).split("\n")[0]
         source_meta = raw
-    # 正文: #zoom 里的段落
+    # 正文: #zoom 里按文档序遍历 <p>/<img>(find_all 返回文档序,含嵌套)
     content_el = soup.select_one("#zoom")
-    content = ""
+    blocks: list[dict] = []
     if content_el:
-        # 只取 p 文本,过滤脚本/空
-        parts = [p.get_text("", strip=True) for p in content_el.find_all("p")]
-        content = "\n".join(p for p in parts if p)
-        if not content:
-            content = content_el.get_text(" ", strip=True)
-    if not title and not content:
+        seen_img: set[str] = set()
+        img_index = 0
+        for el in content_el.find_all(["p", "img"]):
+            if el.name == "p":
+                text = el.get_text("", strip=True)
+                if text:  # 过滤空段(center 内/纯图报道的空 <p>)
+                    blocks.append({"type": "p", "text": text})
+            else:  # img
+                src = str(el.get("src", ""))
+                if "cnml.files" in src and ".resbrief." in src and src not in seen_img:
+                    seen_img.add(src)
+                    img_index += 1
+                    blocks.append(
+                        {
+                            "type": "img",
+                            "src": src,
+                            "alt": str(el.get("alt", "")),
+                            "index": img_index,
+                            "local_path": None,
+                        }
+                    )
+    if not title and not blocks:
         return None
-    return {"title": title, "source_meta": source_meta, "content": content}
+    return {"title": title, "source_meta": source_meta, "blocks": blocks}
 
 
 def parse_article_images(html: str) -> list[str]:
