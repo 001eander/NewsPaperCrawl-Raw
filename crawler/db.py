@@ -120,7 +120,7 @@ async def import_papers(db: aiosqlite.Connection, rows: list[dict]) -> int:
 
 async def get_papers(db: aiosqlite.Connection) -> list[aiosqlite.Row]:
     cur = await db.execute("SELECT * FROM papers ORDER BY paperid")
-    return await cur.fetchall()
+    return list(await cur.fetchall())
 
 
 # ---- 期次 ----
@@ -149,7 +149,7 @@ async def pending_issues(
         cur = await db.execute(
             "SELECT * FROM issues WHERE status='pending' LIMIT ?", (limit,)
         )
-    return await cur.fetchall()
+    return list(await cur.fetchall())
 
 
 # ---- 版面 ----
@@ -172,7 +172,7 @@ async def get_boards_for_issue(
         "SELECT * FROM boards WHERE paperid=? AND date=? ORDER BY board_no",
         (paperid, date),
     )
-    return await cur.fetchall()
+    return list(await cur.fetchall())
 
 
 # ---- 报道 ----
@@ -196,7 +196,7 @@ async def pending_articles(
     cur = await db.execute(
         "SELECT * FROM articles WHERE status='pending' LIMIT ?", (limit,)
     )
-    return await cur.fetchall()
+    return list(await cur.fetchall())
 
 
 async def update_article_status(
