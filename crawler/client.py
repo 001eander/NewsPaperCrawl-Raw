@@ -84,7 +84,7 @@ class HttpClient:
                             raise AuthError(f"认证失效于 {url}(被重定向到登录页)")
                         text = await resp.text()
                         # 认证检测②: 响应内容呈现登录页(兜底)
-                        self.auth.check_and_raise(url, text)
+                        await self.auth.check_and_raise(url, text)
                         if resp.status >= 400:
                             raise RuntimeError(f"HTTP {resp.status} for {url}")
                         return text

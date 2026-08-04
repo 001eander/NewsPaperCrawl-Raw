@@ -147,17 +147,19 @@ class AuthManager:
         # ④ 内容为空或极小,且含"登录"
         return len(text) < 200 and any(m in text for m in ["登录", "login"])
 
-    def check_and_raise(self, url: str, text: str):
+    async def check_and_raise(self, url: str, text: str):
         """若认证失效,抛 AuthError 并推送 Bark"""
         if self.response_is_auth_fail(text):
-            self.notify("浙图爬虫:认证失效", f"访问 {url} 时检测到登录跳转,请重新登录")
+            await self.notify(
+                "浙图爬虫:认证失效", f"访问 {url} 时检测到登录跳转,请重新登录"
+            )
             raise AuthError(f"认证失效于 {url}")
 
     # ---- Bark 通知 ----
 
-    def notify(self, title: str, body: str = ""):
+    async def notify(self, title: str, body: str = ""):
         """通过 Bark 推送通知到手机(委托 BarkNotifier)"""
-        BarkNotifier().notify(title, body)
+        await BarkNotifier().notify(title, body)
 
 
 # 单例

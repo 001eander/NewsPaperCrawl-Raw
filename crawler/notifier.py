@@ -2,7 +2,10 @@
 Bark 通知模块
 =============
 爬虫收尾统一通知:正常爬完 / 认证失效 / 未知错误 都会推送 Bark。
-异步通知在事件循环里挂后台任务;同步环境(如 cli.py 捕获异常后)直接 run。
+
+推送是异步 I/O,但必须在 run() 返回前完整 await——CLI 是"一次 asyncio.run 即退出"
+的程序,若把推送挂成后台任务,asyncio.run 关闭事件循环时会强制取消未完成任务,
+推送请求根本不会发出。因此 notify/notify_job_result 均为 async,调用方必须 await。
 
 配置: .secrets/bark.json
   {
@@ -11,7 +14,6 @@ Bark 通知模块
   }
 """
 
-import asyncio
 import json
 import logging
 from pathlib import Path
@@ -60,36 +62,23 @@ class BarkNotifier:
         self._ensure_loaded()
         return bool(self._key)
 
-    def notify(self, title: str, body: str = "") -> None:
+    async def notify(self, title: str, body: str = "") -> None:
         """推送一条通知;配置缺失/推送失败都只记日志,不抛异常"""
         self._ensure_loaded()
         if not self._key:
             return
-
-        async def _push():
-            url = f"{self._server}/{self._key}/{title}"
-            if body:
-                url += f"/{body}"
-            async with aiohttp.ClientSession() as sess:
-                try:
-                    async with sess.get(
-                        url, timeout=aiohttp.ClientTimeout(total=10)
-                    ) as r:
-                        logger.info("Bark 推送: %s (HTTP %s)", title, r.status)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Bark 推送失败: %s", e)
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # 无运行中的事件循环(同步上下文):直接运行
-            asyncio.run(_push())
-        else:
-            # 有运行中的事件循环:挂后台任务,避免阻塞爬虫主流程
-            loop.create_task(_push())
+        url = f"{self._server}/{self._key}/{title}"
+        if body:
+            url += f"/{body}"
+        async with aiohttp.ClientSession() as sess:
+            try:
+                async with sess.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                    logger.info("Bark 推送: %s (HTTP %s)", title, r.status)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Bark 推送失败: %s", e)
 
 
-def notify_job_result(
+async def notify_job_result(
     *,
     outcome: str,
     stage: str,
@@ -114,7 +103,7 @@ def notify_job_result(
         title = "浙图爬虫:爬取完成"
         body = f"阶段 {stage} 完成,处理 {processed or 0} 项"
     notifier = BarkNotifier()
-    notifier.notify(title, body)
+    await notifier.notify(title, body)
     # 若认证失效且 Bark 未配置,退化为提示日志(console 也能看到)
     if outcome == "auth" and not notifier.is_configured:
         logger.warning("认证失效但未配置 bark.json,无法推送通知;请配置后重试")
