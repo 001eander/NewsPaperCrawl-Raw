@@ -1,0 +1,128 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    //
+    // 命令来源映射:
+    //   - cli.py 子命令(除 login): import / issues / boards / articles
+    //   - scripts/ 脚本: login.py / status.py
+    //   (login 仅存在于 scripts/login.py,cli.py 已移除该子命令)
+    // 默认在项目根目录执行,data/、logs/、.secrets/ 均相对项目根解析。
+    //
+    // 参数与输出:
+    //   - 每个任务通过 ${input:xxx} 提示输入命令行参数,留空则走程序默认
+    //   - 爬取流水线(import/issues/boards/articles) 复用同一终端,便于持续观察进度
+    //   - login 需要交互输验证码,独立终端并自动聚焦
+    //   - status 输出表格,每次新建干净终端,不复用旧终端
+    "version": "2.0.0",
+    "tasks": [
+        // ---------- cli.py 爬取流水线(复用同一终端) ----------
+        {
+            // 阶段0: 导入报纸清单 CSV 到数据库(幂等)
+            "label": "import",
+            "type": "shell",
+            "command": "uv run cli.py import ${input:import-args}",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            // 阶段1: 枚举期次;回车用默认 2014~2026-07,也可输入年份范围
+            "label": "issues",
+            "type": "shell",
+            "command": "uv run cli.py issues ${input:issues-args}",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            // 阶段2: 抓版面/位置/版面图(省略 --limit 处理全部 pending)
+            "label": "boards",
+            "type": "shell",
+            "command": "uv run cli.py boards ${input:boards-args}",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            // 阶段3: 抓报道正文+配图(省略 --limit 处理全部 pending)
+            "label": "articles",
+            "type": "shell",
+            "command": "uv run cli.py articles ${input:articles-args}",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+
+        // ---------- scripts/ 辅助工具 ----------
+        {
+            // 登录辅助: 需要手动输验证码/点登录,独立终端并自动聚焦
+            "label": "login",
+            "type": "shell",
+            "command": "uv run scripts/login.py ${input:login-args}",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true
+            },
+            "problemMatcher": []
+        },
+        {
+            // 进度查询: 输出表格,每次新建干净终端,不复用旧终端
+            "label": "status",
+            "type": "shell",
+            "command": "uv run scripts/status.py ${input:status-args}",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+                "clear": true
+            },
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "import-args",
+            "type": "promptString",
+            "description": "import 可选参数,如 --csv <路径>;留空用默认 archive/报纸清单.csv",
+            "default": ""
+        },
+        {
+            "id": "issues-args",
+            "type": "promptString",
+            "description": "issues 参数: <起始年> <结束年> [--end-month N] [--concurrency N];直接回车用默认 2014 2026 --end-month 7",
+            "default": "2014 2026 --end-month 7"
+        },
+        {
+            "id": "boards-args",
+            "type": "promptString",
+            "description": "boards 可选参数: [--paperid <id>] [--limit N] [--concurrency N];留空处理全部 pending",
+            "default": ""
+        },
+        {
+            "id": "articles-args",
+            "type": "promptString",
+            "description": "articles 可选参数: [--limit N] [--concurrency N];留空处理全部 pending",
+            "default": ""
+        },
+        {
+            "id": "login-args",
+            "type": "promptString",
+            "description": "login 可选参数: [--credentials <path>] [--cookies <path>];留空用 .secrets/ 默认路径",
+            "default": ""
+        },
+        {
+            "id": "status-args",
+            "type": "promptString",
+            "description": "status 可选参数: [--by-paper] [--failed N];留空只输出概览",
+            "default": ""
+        }
+    ]
+}
