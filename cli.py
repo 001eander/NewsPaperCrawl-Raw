@@ -8,7 +8,6 @@
   uv run cli.py issues 2014 2026 --end-month 7   # 阶段1: 枚举全部期次(2014~2026-07)
   uv run cli.py boards --limit 50           # 阶段2: 抓版面/位置/版面图(省略 --limit 处理全部 pending)
   uv run cli.py articles --limit 100        # 阶段3: 抓报道正文+配图(省略 --limit 处理全部 pending)
-  uv run cli.py login                       # 登录辅助: 自动填表,手动输验证码/点登录,保存 cookie
 
 所有阶段可反复执行,自动跳过已完成(status=done)。
 认证失效时自动通过 Bark 通知你重新登录。
@@ -21,7 +20,6 @@ import logging
 from crawler.auth import AuthError
 from crawler.crawler import run
 from crawler.logging_config import setup_logging
-from scripts.login import run_login
 
 
 def main():
@@ -71,26 +69,9 @@ def main():
         help="HTTP 并发上限(默认取环境变量 NEWSPAPER_CONCURRENCY,再默认 8)",
     )
 
-    p_login = sub.add_parser(
-        "login", help="登录辅助: 自动填表,手动输验证码/点登录,保存 cookie"
-    )
-    p_login.add_argument(
-        "--credentials",
-        default=None,
-        help="凭据文件路径(默认 .secrets/credentials.json)",
-    )
-    p_login.add_argument(
-        "--cookies", default=None, help="Cookie 保存路径(默认 .secrets/cookies.json)"
-    )
-
     args = p.parse_args()
 
     setup_logging()
-
-    # login 是 Playwright 同步流程,不能混进异步 run(),单独分支执行
-    if args.stage == "login":
-        run_login(credentials_path=args.credentials, cookies_path=args.cookies)
-        return
 
     kwargs = {k: v for k, v in vars(args).items() if k != "stage" and v is not None}
     try:
@@ -99,7 +80,7 @@ def main():
         # 认证失效:已由 run() 推送 Bark,这里给出可操作提示并以非零码退出
         # (便于 cron/systemd 感知失败)
         logging.getLogger(__name__).error(
-            "认证失效: %s\n已通过 Bark 推送通知,请重新执行 uv run cli.py login "
+            "认证失效: %s\n已通过 Bark 推送通知,请重新执行 uv run scripts/login.py "
             "更新登录状态后再试",
             e,
         )

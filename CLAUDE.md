@@ -22,8 +22,7 @@ uv run cli.py issues 2014 2026 --end-month 7   # 阶段1: 枚举期次(2014~2026
 uv run cli.py boards             # 阶段2: 抓版面/位置/版面图(省略 --limit 处理全部 pending)
 uv run cli.py articles           # 阶段3: 抓报道正文+配图(省略 --limit 处理全部 pending)
 uv run cli.py boards --paperid n.D330100hzrb --limit 10   # 限量或限定报纸跑阶段2
-uv run cli.py login              # Playwright 登录辅助: 自动填表,手动输验证码/点登录,保存 cookie
-uv run scripts/login.py          # 等价,脚本可独立运行
+uv run scripts/login.py          # Playwright 登录辅助: 自动填表,手动输验证码/点登录,保存 cookie
 ```
 
 `boards`/`articles` 阶段省略 `--limit` 即处理全部 pending 项;显式 `--limit N` 每轮限量、可分批续跑。
@@ -83,7 +82,7 @@ uvx pre-commit run --all-files   # 手动跑全部钩子(ruff-format + ruff)
 - [crawler/notifier.py](crawler/notifier.py) — Bark 手机推送;异步上下文挂后台任务,同步上下文直接 `run`,未配置时静默跳过
 - [crawler/logging_config.py](crawler/logging_config.py) — 控制台 + 按日滚动文件双通道,幂等;`ProgressLogger` 用于高频事件节流(如报道落库)
 - [crawler/config.py](crawler/config.py) — 所有运行时路径统一收口,支持环境变量覆盖(Docker 用 `NEWSPAPER_*` 注入)
-- [scripts/login.py](scripts/login.py) — Playwright 同步登录流程(`cli.py login` 复用):打开 share 资源页 → 点"方正数字报"让 JS 弹出新标签页 → 自动填账号/选机构 → 等用户输验证码点登录 → 保存全部 cookie
+- [scripts/login.py](scripts/login.py) — Playwright 同步登录流程:打开 share 资源页 → 点"方正数字报"让 JS 弹出新标签页 → 自动填账号/选机构 → 等用户输验证码点登录 → 保存全部 cookie
 
 ### 认证与通知
 
