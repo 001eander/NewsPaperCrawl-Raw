@@ -4,7 +4,7 @@
     //
     // 命令来源映射:
     //   - cli.py 子命令(除 login): import / issues / boards / articles
-    //   - scripts/ 脚本: login.py / status.py
+    //   - scripts/ 脚本: login.py / status.py / run_articles_loop.py
     //   (login 仅存在于 scripts/login.py,cli.py 已移除该子命令)
     // 默认在项目根目录执行,data/、logs/、.secrets/ 均相对项目根解析。
     //
@@ -54,6 +54,17 @@
             "label": "articles",
             "type": "shell",
             "command": "uv run cli.py articles ${input:articles-args}",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            // 阶段3 无人值守循环: 跑完自动轮询;认证失效自动拉起 login 重新登录
+            "label": "articles-loop",
+            "type": "shell",
+            "command": "uv run scripts/run_articles_loop.py ${input:articles-loop-args}",
             "presentation": {
                 "reveal": "always",
                 "panel": "shared"
@@ -111,6 +122,12 @@
             "type": "promptString",
             "description": "articles 可选参数: [--limit N] [--concurrency N];留空处理全部 pending",
             "default": ""
+        },
+        {
+            "id": "articles-loop-args",
+            "type": "promptString",
+            "description": "articles 循环参数: [--concurrency N] [--poll-seconds N] [--retry-delay N];默认 --concurrency 16 自动循环",
+            "default": "--concurrency 16"
         },
         {
             "id": "login-args",
