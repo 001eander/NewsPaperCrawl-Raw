@@ -8,7 +8,8 @@
      - 未登录:新标签页落到 SSO 登录页,自动填账号/选机构,等你在浏览器里输
        验证码并手动点登录,登录后站点自动回跳到方正数字报落地页
      - 已登录:新标签页直接落到 apabi
-  3. 检测到方正数字报落地页后,保存全部 Cookies 到 .secrets/cookies.json
+  3. 检测到方正数字报落地页后,等 cookie 连续 15s 无变化(登录稳定)再保存
+     全部 Cookies 到 .secrets/cookies.json
 
 关键点:全程不强制 goto,由站点 JS 自己带过去,这样才能拿到
 vpn358_sid 会话 cookie(crawler/auth.py 认证依赖)。
@@ -43,6 +44,8 @@ LOGIN_URL_MARKER = "sso/login"
 APABI_URL_MARKERS = ("apabi--com.elib.zyproxy.zjlib.cn",)
 # 登录后要确认的关键会话 cookie
 VPN_COOKIE = "vpn358_sid"
+# SSO 跳转后 cookie 需连续多少秒无变化,才认为登录真正完成、cookie 稳定
+COOKIE_STABLE_SECONDS = 15
 
 DEFAULT_CREDENTIALS = (
     Path(__file__).resolve().parent.parent / ".secrets" / "credentials.json"
@@ -95,6 +98,11 @@ def is_fangzheng_page(page) -> bool:
         return "方正数字报" in (page.title() or "")
     except Exception:  # noqa: BLE001  # 导航中标题不可读时按"不是"处理
         return False
+
+
+def _cookies_snapshot(ctx) -> frozenset:
+    """当前 context 全部 cookie 的快照,用于检测 cookie 是否仍在变化"""
+    return frozenset((c["name"], c["domain"], c["value"]) for c in ctx.cookies())
 
 
 def _page_label(page) -> str:
@@ -202,8 +210,27 @@ def run_login(
             print("[2/6] 已登录,新标签页直接进入方正数字报")
             print("[6/6] 已进入方正数字报")
 
-        # 已进入方正数字报落地页,稍等 cookie 全部落定后保存(所有标签页共享 context)
-        time.sleep(3)
+        # cookie 稳定检测:跳转后 vpn358_sid 等会话 cookie 可能还会刷新几次,
+        # 连续 COOKIE_STABLE_SECONDS 秒无变化才认为登录真正完成。以 cookie 自身
+        # 稳定性为准,比比对落地页 URL 更可靠(参数顺序/编码有差异也不会卡住)。
+        last_snapshot = _cookies_snapshot(ctx)
+        stable_since = time.time()
+        stable_deadline = time.time() + 120  # 总超时,防止登录未完成时无限等待
+        while time.time() < stable_deadline:
+            time.sleep(2)
+            snapshot = _cookies_snapshot(ctx)
+            if snapshot == last_snapshot:
+                if time.time() - stable_since >= COOKIE_STABLE_SECONDS:
+                    print(f"cookie 已稳定(连续 {COOKIE_STABLE_SECONDS}s 无变化)")
+                    break
+            else:
+                last_snapshot = snapshot
+                stable_since = time.time()
+        else:
+            print("⚠ 等待 cookie 稳定超时(可能未完整落定,仍保存,靠 VPN_COOKIE 检查兜底)")
+
+        # 已进入方正数字报落地页,保存全部 cookie(所有标签页共享 context)
+        time.sleep(1)
         cookies = ctx.cookies()
         payload = [
             {"name": c["name"], "value": c["value"], "domain": c["domain"]}
