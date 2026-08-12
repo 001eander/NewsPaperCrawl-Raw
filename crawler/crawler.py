@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 # 报道落库是最高频事件,用节流日志避免 crawl.log 膨胀(见 ProgressLogger)
 _article_progress = ProgressLogger(__name__)
+# 单张配图下载超时:CDN 偶发挂起/极慢的图若无限时,会拖垮整批 gather
+_IMG_TIMEOUT = 20
 
 
 # ---------------- 阶段0:导入报纸清单 ----------------
@@ -367,14 +369,26 @@ async def _save_article_images(
     date_path = art["date"].replace("-", "/")
     art_dir = DATA_DIR / "articles" / code / date_path / tail
     art_dir.mkdir(parents=True, exist_ok=True)
-    results = []
-    for i, url in enumerate(img_urls, 1):
+
+    async def download_one(i: int, url: str) -> dict:
         suffix = Path(url).suffix or ".jpg"
         # 相对路径统一用 / 分隔(as_posix),Windows 上跑出的 DB 路径也能被 Linux 容器解析
         rel = (Path("articles") / code / date_path / tail / f"{i}{suffix}").as_posix()
-        ok = await client.download(url, DATA_DIR / rel)
-        results.append({"url": url, "local_path": rel if ok else None, "ok": ok})
-    return results
+        try:
+            # 单图限时:CDN 偶发挂起/极慢的图若不限时,会拖垮整批 gather(长尾)。
+            # 超时的图 local_path 置空(JSON 回退 src),后续可单独补图。
+            async with asyncio.timeout(_IMG_TIMEOUT):
+                ok = await client.download(url, DATA_DIR / rel)
+        except TimeoutError:
+            ok = False
+        return {"url": url, "local_path": rel if ok else None, "ok": ok}
+
+    # 并行下载配图:一篇多图文章(尤其 10+ 图)串行下载会拖垮吞吐,
+    # 实际并发受 client._sem 全局封顶,不会因此打爆站点。
+    results = await asyncio.gather(
+        *(download_one(i, url) for i, url in enumerate(img_urls, 1))
+    )
+    return list(results)
 
 
 def _article_json_path(art: dict) -> str:

@@ -27,16 +27,21 @@ class HttpClient:
         self,
         auth: AuthManager | None = None,
         concurrency: int = CONCURRENCY,
+        img_concurrency: int = 6,
         min_delay: float = 0.3,
         max_delay: float = 1.0,
         retries: int = 3,
     ):
         self.auth = auth or get_auth()
         self.concurrency = concurrency
+        self.img_concurrency = img_concurrency
         self.min_delay = min_delay
         self.max_delay = max_delay
         self.retries = retries
         self._sem = asyncio.Semaphore(concurrency)
+        # 图片 CDN(http-img--enews--apabi-*)对高并发敏感:持续高压会从 ~1s 退化到 20s+。
+        # 图片下载走独立低并发信号量,避免打爆 CDN 反噬整体吞吐。
+        self._img_sem = asyncio.Semaphore(img_concurrency)
         self._session: aiohttp.ClientSession | None = None
         # 关闭证书校验(图书馆代理证书过期)
         self._ssl = ssl.create_default_context()
@@ -106,10 +111,14 @@ class HttpClient:
             )
         }
         for attempt in range(self.retries):
-            await self._throttle()
-            async with self._sem:
+            async with self._img_sem:
                 try:
-                    async with self._session.get(url, headers=headers) as resp:
+                    # 图片请求用短超时:CDN 上偶发挂起/缓慢的图若按正文 30s 超时,
+                    # 重试 3 次会拖到 96s+,成为整批长尾。15s 足够下载正常图片。
+                    # 图片走独立低并发信号量,靠并发数保护 CDN,不再叠加随机延迟。
+                    async with self._session.get(
+                        url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)
+                    ) as resp:
                         if resp.status == 404:
                             return False
                         if resp.status >= 400:
